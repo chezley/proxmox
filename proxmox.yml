@@ -1,0 +1,86 @@
+---
+- name: Install VM on proxmox server
+  hosts: all
+  vars_files:
+    - secrets.yml
+  tasks:
+
+    - set_fact:
+        yeppers: "{{ item }}"
+      loop: "{{ vms.names }}"
+
+    - name: create VM  
+      community.general.proxmox_kvm:
+        api_user: "{{ proxmox_api.user }}"
+        api_token_id: "{{ proxmox_api.token_id }}"
+        api_token_secret: "{{ proxmox_api.password }}"
+        api_host: "{{ proxmox_api.host }}"
+        clone: chezznutt
+        name: "{{ yeppers }}"
+        node: chez
+        full: false
+        timeout: 500
+
+    - name: start VM
+      community.general.proxmox_kvm:
+        api_user: "{{ proxmox_api.user }}"
+        api_token_id: "{{ proxmox_api.token_id }}"
+        api_token_secret: "{{ proxmox_api.password }}"
+        api_host: "{{ proxmox_api.host }}"
+        name: "{{ yeppers }}"
+        node: chez
+        state: started
+
+    - name: Update VM | IP
+      community.general.proxmox_kvm:
+        api_user: "{{ proxmox_api.user }}"
+        api_token_id: "{{ proxmox_api.token_id }}"
+        api_token_secret: "{{ proxmox_api.password }}"
+        api_host: "{{ proxmox_api.host }}"
+        name: "{{ yeppers }}"
+        node: chez
+        ipconfig:
+          ipconfig0: 'ip=dhcp'
+        update: yes
+
+    - name: firststuff
+      shell: qm list | grep "{{ yeppers }}" | awk '{ print $1 }'
+      register: thevmid
+    - name: debug
+      debug:
+        var: thevmid.stdout 
+    
+    - name: getstuff
+      shell: qm config "{{ thevmid.stdout }}" | grep ^net0 | awk -F, '{print $1}' | awk -F= '{print $2}'
+      register: stuff
+    - name: debug
+      debug:
+        var: stuff.stdout
+    - name: Pause for 5 minute to build app cache
+      ansible.builtin.pause:
+        minutes: 1
+    - name: getarp
+      shell: nmap -sT 10.0.1.0/24
+      register: nmap
+    - debug:
+        var: nmap 
+    - name: getip
+      shell: arp | grep "{{ stuff.stdout|lower | regex_replace('^\\/|\\/$', '') }}" | awk '{ print $1 }'
+      register: theip
+    - debug:
+        var: theip
+    - name: Slack Notification
+      community.general.discord:
+        webhook_id: 1333826944331939933
+        webhook_token: NOkPdnVGtYgV3gQvcLjkKTdJ4eRhqeyZ1WSK_HsQc0y3qzGsklnZhYHVu2cO2yrVxvmc
+        embeds:
+          - title: "Server IP"
+            description: |
+              `Server`: "{{ yeppers }}"
+              `IP ADDRESS: "{{ theip.stdout }}"
+            footer:
+              text: "Provided by Ansible"
+            image:
+              url: "https://docs.ansible.com/ansible/latest/_static/images/logo_invert.png"
+
+        
