@@ -3,84 +3,132 @@
   hosts: all
   vars_files:
     - secrets.yml
+  vars:
+    ssh_key: "{{ lookup('file', '~/.ssh/id_rsa.pub') }}"
   tasks:
 
-    - set_fact:
-        yeppers: "{{ item }}"
-      loop: "{{ vms.names }}"
+    - name: Download rustscan
+      ansible.builtin.get_url:
+        url: https://github.com/RustScan/RustScan/releases/download/2.3.0/rustscan_2.3.0_amd64.deb
+        dest: /root/rustscan_2.3.0_amd64.deb
+        mode: '0644'
+
+    - name: Install rustscan
+      ansible.builtin.apt:
+        deb: /root/rustscan_2.3.0_amd64.deb
 
     - name: create VM  
+      register: create_vm
+      loop: "{{ group_names }}"
       community.general.proxmox_kvm:
         api_user: "{{ proxmox_api.user }}"
         api_token_id: "{{ proxmox_api.token_id }}"
         api_token_secret: "{{ proxmox_api.password }}"
         api_host: "{{ proxmox_api.host }}"
         clone: chezznutt
-        name: "{{ yeppers }}"
+        name: "{{ item }}"
         node: chez
         full: false
-        timeout: 500
+
+    - name: Sleep 20 seconds
+      when: create_vm is changed
+      ansible.builtin.pause:
+        seconds: 20
 
     - name: start VM
+      loop: "{{ group_names }}"
       community.general.proxmox_kvm:
         api_user: "{{ proxmox_api.user }}"
         api_token_id: "{{ proxmox_api.token_id }}"
         api_token_secret: "{{ proxmox_api.password }}"
         api_host: "{{ proxmox_api.host }}"
-        name: "{{ yeppers }}"
+        name: "{{ item }}"
         node: chez
         state: started
 
     - name: Update VM | IP
+      loop: "{{ group_names }}"
+      when: create_vm is changed
       community.general.proxmox_kvm:
         api_user: "{{ proxmox_api.user }}"
         api_token_id: "{{ proxmox_api.token_id }}"
         api_token_secret: "{{ proxmox_api.password }}"
         api_host: "{{ proxmox_api.host }}"
-        name: "{{ yeppers }}"
-        node: chez
+        name: "{{ item }}"
         ipconfig:
           ipconfig0: 'ip=dhcp'
+        sshkeys: "{{ ssh_key }}"
+        node: chez
         update: yes
+        timeout: 500
 
-    - name: firststuff
-      shell: qm list | grep "{{ yeppers }}" | awk '{ print $1 }'
-      register: thevmid
-    - name: debug
-      debug:
-        var: thevmid.stdout 
-    
-    - name: getstuff
-      shell: qm config "{{ thevmid.stdout }}" | grep ^net0 | awk -F, '{print $1}' | awk -F= '{print $2}'
-      register: stuff
-    - name: debug
-      debug:
-        var: stuff.stdout
-    - name: Pause for 5 minute to build app cache
+    - name: Sleep 10 seconds
+      when: create_vm is changed
       ansible.builtin.pause:
-        minutes: 1
-    - name: getarp
-      shell: nmap -sT 10.0.1.0/24
-      register: nmap
-    - debug:
-        var: nmap 
-    - name: getip
-      shell: arp | grep "{{ stuff.stdout|lower | regex_replace('^\\/|\\/$', '') }}" | awk '{ print $1 }'
+        seconds: 10
+      
+    - name: restart VM
+      loop: "{{ group_names }}"
+      when: create_vm is changed
+      community.general.proxmox_kvm:
+        api_user: "{{ proxmox_api.user }}"
+        api_token_id: "{{ proxmox_api.token_id }}"
+        api_token_secret: "{{ proxmox_api.password }}"
+        api_host: "{{ proxmox_api.host }}"
+        name: "{{ item }}"
+        node: chez
+        state: restarted
+
+    - name: Sleep 30 seconds
+      when: create_vm is changed
+      ansible.builtin.pause:
+        seconds: 30 
+
+    - name: Get vmid
+      loop: "{{ group_names }}"
+      shell: qm list | grep "{{ item }}" | awk '{ print $1 }'
+      register: thevmid
+
+    - name: vmid in list
+      ansible.builtin.set_fact:
+        vmid_list: "{{ thevmid.results | map(attribute='stdout') | list }}"
+
+    - name: Show vmid
+      loop: "{{ vmid_list }}"
+      debug:
+        var: "{{ item }}"
+
+    - name: Get IP
+      loop: "{{ group_names }}"
+      shell: rustscan -a "{{ item }}" | grep open | head -n1 | awk '{ print $NF }'
       register: theip
-    - debug:
-        var: theip
-    - name: Slack Notification
+
+    - name: IP in list
+      ansible.builtin.set_fact:
+        ip_list: "{{ theip.results | map(attribute='stdout') | list }}"
+
+    - name: Show IP
+      loop: "{{ ip_list }}"
+      debug:
+        var: "{{ item }}"
+
+    - name: Discord Notification
+      loop: "{{ group_names | zip(ip_list) | list }}"
+      loop_control:
+        index_var: i
+      when: theip is changed and create_vm is changed
       community.general.discord:
-        webhook_id: 1333826944331939933
-        webhook_token: NOkPdnVGtYgV3gQvcLjkKTdJ4eRhqeyZ1WSK_HsQc0y3qzGsklnZhYHVu2cO2yrVxvmc
+        webhook_id: "{{ discord.id }}"
+        webhook_token: "{{ discord.token }}"
         embeds:
           - title: "Server IP"
             description: |
-              `Server`: "{{ yeppers }}"
-              `IP ADDRESS: "{{ theip.stdout }}"
+              `Server`: "{{ item[0] }}"
+              `IP ADDRESS`: "{{ item[1] }}"
             footer:
               text: "Provided by Ansible"
             image:
               url: "https://docs.ansible.com/ansible/latest/_static/images/logo_invert.png"
+
 
         
