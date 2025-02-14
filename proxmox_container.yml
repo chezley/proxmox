@@ -1,0 +1,18 @@
+---
+- name: Create Proxmox containers
+  hosts: all
+  vars_files:
+    - secrets.yml
+  tasks:
+
+    - name: Create new container
+      community.general.proxmox:
+        api_user: "{{ proxmox_api.user }}"
+        api_token_id: "{{ proxmox_api.token_id }}"
+        api_token_secret: "{{ proxmox_api.password }}"
+        api_host: "{{ proxmox_api.host }}"
+        node: chez
+        hostname: chezznutt-container1.org
+        password: test123
+        ostemplate: 'local:vztmpl/almalinux-9-default_20240911_amd64.tar.xz'
+        vmid: 200
