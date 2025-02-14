@@ -66,7 +66,7 @@
       when: create_vm is changed
       ansible.builtin.pause:
         seconds: 10
-      
+
     - name: restart VM
       loop: "{{ group_names }}"
       when: create_vm is changed
@@ -86,21 +86,21 @@
 
     - name: Get vmid
       loop: "{{ group_names }}"
-      shell: qm list | grep "{{ item }}" | awk '{ print $1 }'
+      ansible.builtin.shell: qm list | grep "{{ item }}" | awk '{ print $1 }'
       register: thevmid
 
-    - name: vmid in list
+    - name: Vmid in list
       ansible.builtin.set_fact:
         vmid_list: "{{ thevmid.results | map(attribute='stdout') | list }}"
 
     - name: Show vmid
       loop: "{{ vmid_list }}"
-      debug:
+      ansible.builtin.debug:
         var: "{{ item }}"
 
     - name: Get IP
       loop: "{{ group_names }}"
-      shell: rustscan -a "{{ item }}" | grep open | head -n1 | awk '{ print $NF }'
+      ansible.builtin.shell: rustscan -a "{{ item }}" | grep open | head -n1 | awk '{ print $NF }'
       register: theip
 
     - name: IP in list
@@ -109,7 +109,7 @@
 
     - name: Show IP
       loop: "{{ ip_list }}"
-      debug:
+      ansible.builtin.debug:
         var: "{{ item }}"
 
     - name: Discord Notification
@@ -129,6 +129,3 @@
               text: "Provided by Ansible"
             image:
               url: "https://docs.ansible.com/ansible/latest/_static/images/logo_invert.png"
-
-
-        
